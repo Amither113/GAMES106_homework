@@ -13,7 +13,7 @@ layout (set = 0, binding = 0) uniform UBOScene
 	vec4 viewPos;
 } uboScene;
 
-layout(set = 1, binding = 0) uniform primitive {
+layout(set = 1, binding = 0) uniform Primitive {
 	mat4 model;
 } primitive;
 

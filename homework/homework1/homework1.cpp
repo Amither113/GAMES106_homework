@@ -27,7 +27,7 @@
 
 #include "vulkanexamplebase.h"
 
-#define ENABLE_VALIDATION false
+#define ENABLE_VALIDATION true
 
 // Contains everything required to render a glTF model in Vulkan
 // This class is heavily simplified (compared to glTF's feature set) but retains the basic glTF structure
@@ -206,6 +206,7 @@ public:
 	std::vector<Texture> textures;
 	std::vector<Material> materials;
 	std::vector<Node*> nodes;
+	std::vector<Node*> linearNodes;
 	//ADD
 	//std::vector<Skin>      skins;
 	std::vector<Animation> animations;
@@ -625,6 +626,7 @@ public:
 		else {
 			nodes.push_back(node);
 		}
+		linearNodes.push_back(node);
 	}
 	
 	/*ADD
@@ -752,7 +754,7 @@ public:
 	// Draw a single node including child nodes (if present)
 	void drawNode(VkCommandBuffer commandBuffer, VkPipelineLayout pipelineLayout, VulkanglTFModel::Node* node)
 	{
-		if (node->mesh->primitives.size() > 0) {
+		if (node->mesh) {
 			// 那就不是在这里传递matrix了，只bind images
 			//// Pass the node's matrix via push constants
 			//// Traverse the node hierarchy to the top-most parent to get the final matrix of the current node
@@ -938,7 +940,7 @@ public:
 			//glTFModel.loadSkins(glTFInput);
 			glTFModel.loadAnimations(glTFInput);
 			// 所以这里需要updatenodes上传一下matrix数据 到gpu
-			for (auto node : glTFModel.nodes) {
+			for (auto node : glTFModel.linearNodes) {
 				if (node->mesh) {
 					glTFModel.updateNodes(node);
 				}
@@ -1036,24 +1038,33 @@ public:
 			然后我加了nodemesh的matrix，去掉pushconstant
 		*/
 		uint32_t uboCount{ 0 };
-		for (auto node : glTFModel.nodes) {
+		for (auto node : glTFModel.linearNodes) {
 			if (node->mesh) {
 				uboCount++;
 			}
 		}
 
 		std::vector<VkDescriptorPoolSize> poolSizes = {
+			// scene matrix
+			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1),
 			// One combined image sampler per model image/texture
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(glTFModel.images.size())),
 			// ADD one uniform per mesh
 			vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(uboCount)),
+			
 		};
 		// One set for matrices and one per model image/texture
 		//const uint32_t maxSetCount = static_cast<uint32_t>(glTFModel.images.size()) + static_cast<uint32_t>(glTFModel.skins.size()) + 1;
-		const uint32_t maxSetCount = static_cast<uint32_t>(glTFModel.images.size()) + uboCount;
-		VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, maxSetCount);
-		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
+		//const uint32_t maxSetCount = static_cast<uint32_t>(glTFModel.images.size()) + uboCount;
+		//VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, maxSetCount);
+		//VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 
+		VkDescriptorPoolCreateInfo descriptorPoolCI{};
+		descriptorPoolCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		descriptorPoolCI.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+		descriptorPoolCI.pPoolSizes = poolSizes.data();
+		descriptorPoolCI.maxSets = uboCount + static_cast<uint32_t>(glTFModel.images.size()) + 1;
+		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolCI, nullptr, &descriptorPool));
 
 		// Descriptor set layouts for matrices and materials
 		{
@@ -1082,6 +1093,12 @@ public:
 				descriptorSetLayouts.textures 
 			};
 			VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(setLayouts.data(), static_cast<uint32_t>(setLayouts.size()));
+			//// We will use push constants to push the local matrices of a primitive to the vertex shader
+			//VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, sizeof(glm::mat4), 0);
+			//// Push constant ranges are part of the pipeline layout
+			//pipelineLayoutCI.pushConstantRangeCount = 1;
+			//pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
+			VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
 
 			// Descriptor set for scene matrices
 			VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.matrices, 1);
@@ -1137,6 +1154,7 @@ public:
 		VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
 		VkPipelineViewportStateCreateInfo viewportStateCI = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
 		VkPipelineMultisampleStateCreateInfo multisampleStateCI = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT, 0);
+		// pDynamicState
 		const std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 		VkPipelineDynamicStateCreateInfo dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables.data(), static_cast<uint32_t>(dynamicStateEnables.size()), 0);
 		// Vertex input bindings and attributes
@@ -1153,11 +1171,11 @@ public:
 			//vks::initializers::vertexInputAttributeDescription(0, 5, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VulkanglTFModel::Vertex, jointWeights)),
 		};
 		VkPipelineVertexInputStateCreateInfo vertexInputStateCI = vks::initializers::pipelineVertexInputStateCreateInfo();
-		vertexInputStateCI.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputBindings.size());
-		vertexInputStateCI.pVertexBindingDescriptions = vertexInputBindings.data();
-		vertexInputStateCI.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributes.size());
-		vertexInputStateCI.pVertexAttributeDescriptions = vertexInputAttributes.data();
-
+			vertexInputStateCI.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputBindings.size());
+			vertexInputStateCI.pVertexBindingDescriptions = vertexInputBindings.data();
+			vertexInputStateCI.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributes.size());
+			vertexInputStateCI.pVertexAttributeDescriptions = vertexInputAttributes.data();
+		// pStages
 		const std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages = {
 			loadShader(getHomeworkShadersPath() + "homework1/mesh.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
 			loadShader(getHomeworkShadersPath() + "homework1/mesh.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
