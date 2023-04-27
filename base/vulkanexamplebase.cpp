@@ -757,7 +757,9 @@ void VulkanExampleBase::submitFrame()
 	else {
 		VK_CHECK_RESULT(result);
 	}
-	VK_CHECK_RESULT(vkQueueWaitIdle(queue));
+	VkResult result1;
+	result1 = vkQueueWaitIdle(queue);
+	VK_CHECK_RESULT(result1);
 }
 
 VulkanExampleBase::VulkanExampleBase(bool enableValidation)

@@ -1272,96 +1272,102 @@ void vkglTF::Model::loadFromFile(std::string filename, vks::VulkanDevice *device
 
 	assert((vertexBufferSize > 0) && (indexBufferSize > 0));
 
-	struct StagingBuffer {
-		VkBuffer buffer;
-		VkDeviceMemory memory;
-	} vertexStaging, indexStaging;
+
 
 	// Create staging buffers
-	// Vertex data
-	VK_CHECK_RESULT(device->createBuffer(
-		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		vertexBufferSize,
-		&vertexStaging.buffer,
-		&vertexStaging.memory,
-		vertexBuffer.data()));
-	// Index data
-	VK_CHECK_RESULT(device->createBuffer(
-		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		indexBufferSize,
-		&indexStaging.buffer,
-		&indexStaging.memory,
-		indexBuffer.data()));
+	// 创建两个buffer，通过cmd来copy
+	{
+		struct StagingBuffer {
+			VkBuffer buffer;
+			VkDeviceMemory memory;
+		} vertexStaging, indexStaging;
+		// Vertex data
+		VK_CHECK_RESULT(device->createBuffer(
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			vertexBufferSize,
+			&vertexStaging.buffer,
+			&vertexStaging.memory,
+			vertexBuffer.data()));
+		// Index data
+		VK_CHECK_RESULT(device->createBuffer(
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			indexBufferSize,
+			&indexStaging.buffer,
+			&indexStaging.memory,
+			indexBuffer.data()));
 
-	// Create device local buffers
-	// Vertex buffer
-	VK_CHECK_RESULT(device->createBuffer(
-	    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | memoryPropertyFlags,
-		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-		vertexBufferSize,
-		&vertices.buffer,
-		&vertices.memory));
-	// Index buffer
-	VK_CHECK_RESULT(device->createBuffer(
-	    VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | memoryPropertyFlags,
-		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-		indexBufferSize,
-		&indices.buffer,
-		&indices.memory));
+		// Create device local buffers
+		// Vertex buffer
+		VK_CHECK_RESULT(device->createBuffer(
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | memoryPropertyFlags,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+			vertexBufferSize,
+			&vertices.buffer,
+			&vertices.memory));
+		// Index buffer
+		VK_CHECK_RESULT(device->createBuffer(
+			VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | memoryPropertyFlags,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+			indexBufferSize,
+			&indices.buffer,
+			&indices.memory));
 
-	// Copy from staging buffers
-	VkCommandBuffer copyCmd = device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+		// Copy from staging buffers
+		VkCommandBuffer copyCmd = device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
-	VkBufferCopy copyRegion = {};
+		VkBufferCopy copyRegion = {};
 
-	copyRegion.size = vertexBufferSize;
-	vkCmdCopyBuffer(copyCmd, vertexStaging.buffer, vertices.buffer, 1, &copyRegion);
+		copyRegion.size = vertexBufferSize;
+		vkCmdCopyBuffer(copyCmd, vertexStaging.buffer, vertices.buffer, 1, &copyRegion);
 
-	copyRegion.size = indexBufferSize;
-	vkCmdCopyBuffer(copyCmd, indexStaging.buffer, indices.buffer, 1, &copyRegion);
+		copyRegion.size = indexBufferSize;
+		vkCmdCopyBuffer(copyCmd, indexStaging.buffer, indices.buffer, 1, &copyRegion);
 
-	device->flushCommandBuffer(copyCmd, transferQueue, true);
+		device->flushCommandBuffer(copyCmd, transferQueue, true);
 
-	vkDestroyBuffer(device->logicalDevice, vertexStaging.buffer, nullptr);
-	vkFreeMemory(device->logicalDevice, vertexStaging.memory, nullptr);
-	vkDestroyBuffer(device->logicalDevice, indexStaging.buffer, nullptr);
-	vkFreeMemory(device->logicalDevice, indexStaging.memory, nullptr);
+		vkDestroyBuffer(device->logicalDevice, vertexStaging.buffer, nullptr);
+		vkFreeMemory(device->logicalDevice, vertexStaging.memory, nullptr);
+		vkDestroyBuffer(device->logicalDevice, indexStaging.buffer, nullptr);
+		vkFreeMemory(device->logicalDevice, indexStaging.memory, nullptr);
+	}
 
 	getSceneDimensions();
 
 	// Setup descriptors
-	uint32_t uboCount{ 0 };
-	uint32_t imageCount{ 0 };
-	for (auto node : linearNodes) {
-		if (node->mesh) {
-			uboCount++;
+	// 创建pool
+	{
+		uint32_t uboCount{ 0 };
+		uint32_t imageCount{ 0 };
+		for (auto node : linearNodes) {
+			if (node->mesh) {
+				uboCount++;
+			}
 		}
+		for (auto material : materials) {
+			if (material.baseColorTexture != nullptr) {
+				imageCount++;
+			}
+		}
+		std::vector<VkDescriptorPoolSize> poolSizes = {
+			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uboCount },
+		};
+		if (imageCount > 0) {
+			if (descriptorBindingFlags & DescriptorBindingFlags::ImageBaseColor) {
+				poolSizes.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageCount });
+			}
+			if (descriptorBindingFlags & DescriptorBindingFlags::ImageNormalMap) {
+				poolSizes.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageCount });
+			}
+		}
+		VkDescriptorPoolCreateInfo descriptorPoolCI{};
+		descriptorPoolCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		descriptorPoolCI.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+		descriptorPoolCI.pPoolSizes = poolSizes.data();
+		descriptorPoolCI.maxSets = uboCount + imageCount;
+		VK_CHECK_RESULT(vkCreateDescriptorPool(device->logicalDevice, &descriptorPoolCI, nullptr, &descriptorPool));
 	}
-	for (auto material : materials) {
-		if (material.baseColorTexture != nullptr) {
-			imageCount++;
-		}
-	}
-	std::vector<VkDescriptorPoolSize> poolSizes = {
-		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uboCount },
-	};
-	if (imageCount > 0) {
-		if (descriptorBindingFlags & DescriptorBindingFlags::ImageBaseColor) {
-			poolSizes.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageCount });
-		}
-		if (descriptorBindingFlags & DescriptorBindingFlags::ImageNormalMap) {
-			poolSizes.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageCount });
-		}
-	}
-	VkDescriptorPoolCreateInfo descriptorPoolCI{};
-	descriptorPoolCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	descriptorPoolCI.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-	descriptorPoolCI.pPoolSizes = poolSizes.data();
-	descriptorPoolCI.maxSets = uboCount + imageCount;
-	VK_CHECK_RESULT(vkCreateDescriptorPool(device->logicalDevice, &descriptorPoolCI, nullptr, &descriptorPool));
-
 	// Descriptors for per-node uniform buffers
 	{
 		// Layout is global, so only create if it hasn't already been created before
