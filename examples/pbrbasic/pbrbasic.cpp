@@ -303,7 +303,7 @@ public:
 		VK_CHECK_RESULT(uniformBuffers.params.map());
 
 		updateUniformBuffers();
-		updateLights();
+		updateLights();	
 	}
 
 	void updateUniformBuffers()
