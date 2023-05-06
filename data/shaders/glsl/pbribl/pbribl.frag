@@ -125,7 +125,7 @@ void main()
 	float roughness = material.roughness;
 
 	vec3 F0 = vec3(0.04); 
-	F0 = mix(F0, ALBEDO, metallic);
+	F0 = mix(F0, ALBEDO, metallic);// specular color
 
 	vec3 Lo = vec3(0.0);
 	for(int i = 0; i < uboParams.lights[i].length(); i++) {

@@ -16,17 +16,7 @@ layout (set = 0, binding = 0) uniform UBO {
 
 layout (set = 0, binding = 1) uniform UBOParams {
 	vec4 lightDir;
-	float exposure;
-	float gamma;
-	float prefilteredCubeMipLevels;
-	float scaleIBLAmbient;
-	float debugViewInputs;
-	float debugViewEquation;
 } uboParams;
-
-layout (set = 0, binding = 2) uniform samplerCube samplerIrradiance;
-layout (set = 0, binding = 3) uniform samplerCube prefilteredMap;
-layout (set = 0, binding = 4) uniform sampler2D samplerBRDFLUT;
 
 // Material bindings
 layout (set = 1, binding = 0) uniform sampler2D colorMap;
@@ -81,24 +71,6 @@ const float PBR_WORKFLOW_SPECULAR_GLOSINESS = 1.0f;
 
 #define MANUAL_SRGB 1
 
-vec3 Uncharted2Tonemap(vec3 color)
-{
-	float A = 0.15;
-	float B = 0.50;
-	float C = 0.10;
-	float D = 0.20;
-	float E = 0.02;
-	float F = 0.30;
-	float W = 11.2;
-	return ((color*(A*color+C*B)+D*E)/(color*(A*color+B)+D*F))-E/F;
-}
-
-vec4 tonemap(vec4 color)
-{
-	vec3 outcol = Uncharted2Tonemap(color.rgb * uboParams.exposure);
-	outcol = outcol * (1.0f / Uncharted2Tonemap(vec3(11.2f)));	
-	return vec4(pow(outcol, vec3(1.0f / uboParams.gamma)), color.a);
-}
 
 vec4 SRGBtoLINEAR(vec4 srgbIn)
 {
@@ -120,7 +92,7 @@ vec4 SRGBtoLINEAR(vec4 srgbIn)
 vec3 getNormal()
 {
 	// Perturb normal, see http://www.thetenthplanet.de/archives/1180
-	vec3 tangentNormal = texture(normalMap, material.normalTextureSet == 0 ? inUV0 : inUV1).xyz * 2.0 - 1.0;
+	vec3 tangentNormal = texture(normalMap, inUV0).xyz * 2.0 - 1.0;
 
 	vec3 q1 = dFdx(inWorldPos);
 	vec3 q2 = dFdy(inWorldPos);
@@ -133,29 +105,6 @@ vec3 getNormal()
 	mat3 TBN = mat3(T, B, N);
 
 	return normalize(TBN * tangentNormal);
-}
-
-// Calculation of the lighting contribution from an optional Image Based Light source.
-// Precomputed Environment Maps are required uniform inputs and are computed as outlined in [1].
-// See our README.md on Environment Maps [3] for additional discussion.
-vec3 getIBLContribution(PBRInfo pbrInputs, vec3 n, vec3 reflection)
-{
-	float lod = (pbrInputs.perceptualRoughness * uboParams.prefilteredCubeMipLevels);
-	// retrieve a scale and bias to F0. See [1], Figure 3
-	vec3 brdf = (texture(samplerBRDFLUT, vec2(pbrInputs.NdotV, 1.0 - pbrInputs.perceptualRoughness))).rgb;
-	vec3 diffuseLight = SRGBtoLINEAR(tonemap(texture(samplerIrradiance, n))).rgb;
-
-	vec3 specularLight = SRGBtoLINEAR(tonemap(textureLod(prefilteredMap, reflection, lod))).rgb;
-
-	vec3 diffuse = diffuseLight * pbrInputs.diffuseColor;
-	vec3 specular = specularLight * (pbrInputs.specularColor * brdf.x + brdf.y);
-
-	// For presentation, this allows us to disable IBL terms
-	// For presentation, this allows us to disable IBL terms
-	diffuse *= uboParams.scaleIBLAmbient;
-	specular *= uboParams.scaleIBLAmbient;
-
-	return diffuse + specular;
 }
 
 // Basic Lambertian diffuse
@@ -212,6 +161,11 @@ float convertMetallic(vec3 diffuse, vec3 specular, float maxSpecular) {
 	return clamp((-b + sqrt(D)) / (2.0 * a), 0.0, 1.0);
 }
 
+vec3 materialcolor(vec4 material)
+{
+	return vec3(material.r, material.g, material.b);
+}
+
 void main()
 {
 	float perceptualRoughness;
@@ -222,44 +176,23 @@ void main()
 	vec3 f0 = vec3(0.04);
 
 	if (material.alphaMask == 1.0f) {
-		if (material.baseColorTextureSet > -1) {
-			baseColor = SRGBtoLINEAR(texture(colorMap, material.baseColorTextureSet == 0 ? inUV0 : inUV1)) * material.baseColorFactor;
-		} else {
-			baseColor = material.baseColorFactor;
-		}
+		baseColor = SRGBtoLINEAR(texture(colorMap, inUV0)) * material.baseColorFactor;
 		if (baseColor.a < material.alphaMaskCutoff) {
 			discard;
 		}
 	}
-
-	if (material.workflow == PBR_WORKFLOW_METALLIC_ROUGHNESS) {
-		// Metallic and Roughness material properties are packed together
-		// In glTF, these factors can be specified by fixed scalar values
-		// or from a metallic-roughness map
-		perceptualRoughness = material.roughnessFactor;
+	if (material.workflow == PBR_WORKFLOW_METALLIC_ROUGHNESS) { //	get roughness metallic r g b a
+		perceptualRoughness = material.roughnessFactor; 
 		metallic = material.metallicFactor;
-		if (material.physicalDescriptorTextureSet > -1) {
-			// Roughness is stored in the 'g' channel, metallic is stored in the 'b' channel.
-			// This layout intentionally reserves the 'r' channel for (optional) occlusion map data
-			vec4 mrSample = texture(physicalDescriptorMap, material.physicalDescriptorTextureSet == 0 ? inUV0 : inUV1);
-			perceptualRoughness = mrSample.g * perceptualRoughness;
-			metallic = mrSample.b * metallic;
-		} else {
-			perceptualRoughness = clamp(perceptualRoughness, c_MinRoughness, 1.0);
-			metallic = clamp(metallic, 0.0, 1.0);
-		}
-		// Roughness is authored as perceptual roughness; as is convention,
-		// convert to material roughness by squaring the perceptual roughness [2].
+
+		// Roughness is stored in the 'g' channel, metallic is stored in the 'b' channel.
+		vec4 mrSample = texture(physicalDescriptorMap, inUV0);
+		perceptualRoughness = mrSample.g * perceptualRoughness;
+		metallic = mrSample.b * metallic;
 
 		// The albedo may be defined from a base texture or a flat color
-		if (material.baseColorTextureSet > -1) {
-			baseColor = SRGBtoLINEAR(texture(colorMap, material.baseColorTextureSet == 0 ? inUV0 : inUV1)) * material.baseColorFactor;
-		} else {
-			baseColor = material.baseColorFactor;
-		}
+		baseColor = SRGBtoLINEAR(texture(colorMap, inUV0)) * material.baseColorFactor;
 	}
-
-	baseColor *= inColor0;
 
 	diffuseColor = baseColor.rgb * (vec3(1.0) - f0);
 	diffuseColor *= 1.0 - metallic;
@@ -316,23 +249,31 @@ void main()
 	vec3 diffuseContrib = (1.0 - F) * diffuse(pbrInputs);
 	vec3 specContrib = F * G * D / (4.0 * NdotL * NdotV);
 	// Obtain final intensity as reflectance (BRDF) scaled by the energy of the light (cosine law)
-	vec3 color = NdotL * u_LightColor * (diffuseContrib + specContrib);
+	//vec3 color = NdotL * u_LightColor * (diffuseContrib + specContrib);
+
+	vec3 color = NdotL * u_LightColor * specContrib;
+	color += baseColor.rgb * 0.5;
 
 	// Calculate lighting contribution from image based lighting source (IBL)
-	color += getIBLContribution(pbrInputs, n, reflection);
+	// color += getIBLContribution(pbrInputs, n, reflection);
 
 	const float u_OcclusionStrength = 1.0f;
 	// Apply optional PBR terms for additional (optional) shading
 	if (material.occlusionTextureSet > -1) {
-		float ao = texture(aoMap, (material.occlusionTextureSet == 0 ? inUV0 : inUV1)).r;
+		float ao = texture(aoMap, inUV0).r;
 		color = mix(color, color * ao, u_OcclusionStrength);
 	}
 
 	const float u_EmissiveFactor = 1.0f;
 	if (material.emissiveTextureSet > -1) {
-		vec3 emissive = SRGBtoLINEAR(texture(emissiveMap, material.emissiveTextureSet == 0 ? inUV0 : inUV1)).rgb * u_EmissiveFactor;
+		vec3 emissive = SRGBtoLINEAR(texture(emissiveMap, inUV0)).rgb * u_EmissiveFactor;
 		color += emissive;
 	}
 	
 	outColor = vec4(color, baseColor.a);
+
+	//debug
+	//outColor.rgb = texture(physicalDescriptorMap, inUV0).ggg;
+	//outColor = SRGBtoLINEAR(outColor);
+	//outColor = vec4(specContrib, 1.0f);
 }
