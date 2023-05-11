@@ -20,8 +20,6 @@ layout (set = 0, binding = 0) uniform UBO
 
 layout (set = 2, binding = 0) uniform UBONode {
 	mat4 matrix;
-	mat4 jointMatrix[MAX_NUM_JOINTS];
-	float jointCount;
 } node;
 
 layout (location = 0) out vec3 outWorldPos;
@@ -35,20 +33,10 @@ void main()
 	outColor0 = inColor0;
 
 	vec4 locPos;
-	if (node.jointCount > 0.0) {
-		// Mesh is skinned
-		mat4 skinMat = 
-			inWeight0.x * node.jointMatrix[int(inJoint0.x)] +
-			inWeight0.y * node.jointMatrix[int(inJoint0.y)] +
-			inWeight0.z * node.jointMatrix[int(inJoint0.z)] +
-			inWeight0.w * node.jointMatrix[int(inJoint0.w)];
 
-		locPos = ubo.model * node.matrix * skinMat * vec4(inPos, 1.0);
-		outNormal = normalize(transpose(inverse(mat3(ubo.model * node.matrix * skinMat))) * inNormal);
-	} else {
-		locPos = ubo.model * node.matrix * vec4(inPos, 1.0);
-		outNormal = normalize(transpose(inverse(mat3(ubo.model * node.matrix))) * inNormal);
-	}
+	locPos = ubo.model * node.matrix * vec4(inPos, 1.0);
+	outNormal = normalize(transpose(inverse(mat3(ubo.model * node.matrix))) * inNormal);
+	
 	outWorldPos = locPos.xyz / locPos.w;
 	outUV0 = inUV0;
 	outUV1 = inUV1;
