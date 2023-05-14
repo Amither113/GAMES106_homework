@@ -1107,66 +1107,6 @@ public:
 
 	}
 
-	// Create a frame buffer attachment
-	void createAttachment(
-		VkFormat format,
-		VkImageUsageFlagBits usage,
-		FrameBufferAttachment* attachment,
-		uint32_t width,
-		uint32_t height)
-	{
-		VkImageAspectFlags aspectMask = 0;
-
-		attachment->format = format;
-
-		if (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
-		{
-			aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		}
-		if (usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
-		{
-			aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-			if (format >= VK_FORMAT_D16_UNORM_S8_UINT)
-				aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-		}
-
-		assert(aspectMask > 0);
-
-		VkImageCreateInfo image = vks::initializers::imageCreateInfo();
-		image.imageType = VK_IMAGE_TYPE_2D;
-		image.format = format;
-		image.extent.width = width;
-		image.extent.height = height;
-		image.extent.depth = 1;
-		image.mipLevels = 1;
-		image.arrayLayers = 1;
-		image.samples = VK_SAMPLE_COUNT_1_BIT;
-		image.tiling = VK_IMAGE_TILING_OPTIMAL;
-		image.usage = usage | VK_IMAGE_USAGE_SAMPLED_BIT;
-
-		VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo();
-		VkMemoryRequirements memReqs;
-
-		VK_CHECK_RESULT(vkCreateImage(device, &image, nullptr, &attachment->image));
-		vkGetImageMemoryRequirements(device, attachment->image, &memReqs);
-		memAlloc.allocationSize = memReqs.size;
-		memAlloc.memoryTypeIndex = vulkanDevice->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-		VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &attachment->mem));
-		VK_CHECK_RESULT(vkBindImageMemory(device, attachment->image, attachment->mem, 0));
-
-		VkImageViewCreateInfo imageView = vks::initializers::imageViewCreateInfo();
-		imageView.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		imageView.format = format;
-		imageView.subresourceRange = {};
-		imageView.subresourceRange.aspectMask = aspectMask;
-		imageView.subresourceRange.baseMipLevel = 0;
-		imageView.subresourceRange.levelCount = 1;
-		imageView.subresourceRange.baseArrayLayer = 0;
-		imageView.subresourceRange.layerCount = 1;
-		imageView.image = attachment->image;
-		VK_CHECK_RESULT(vkCreateImageView(device, &imageView, nullptr, &attachment->view));
-	}
-
 	virtual void getEnabledFeatures()
 	{
 		// Fill mode non solid is required for wireframe display
@@ -1644,31 +1584,93 @@ public:
 		}
 	}
 
+	// Create a frame buffer attachment
+	void createAttachment(
+		VkFormat format,
+		VkImageUsageFlagBits usage,
+		FrameBufferAttachment* attachment,
+		uint32_t width,
+		uint32_t height)
+	{
+		VkImageAspectFlags aspectMask = 0;
+
+		attachment->format = format;
+
+		if (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
+		{
+			aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		}
+		if (usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+		{
+			aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+			if (format >= VK_FORMAT_D16_UNORM_S8_UINT)
+				aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+		}
+
+		assert(aspectMask > 0);
+
+		VkImageCreateInfo image = vks::initializers::imageCreateInfo();
+		image.imageType = VK_IMAGE_TYPE_2D;
+		image.format = format;
+		image.extent.width = width;
+		image.extent.height = height;
+		image.extent.depth = 1;
+		image.mipLevels = 1;
+		image.arrayLayers = 1;
+		image.samples = VK_SAMPLE_COUNT_1_BIT;
+		image.tiling = VK_IMAGE_TILING_OPTIMAL;
+		image.usage = usage | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+		VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo();
+		VkMemoryRequirements memReqs;
+
+		VK_CHECK_RESULT(vkCreateImage(device, &image, nullptr, &attachment->image));
+		vkGetImageMemoryRequirements(device, attachment->image, &memReqs);
+		memAlloc.allocationSize = memReqs.size;
+		memAlloc.memoryTypeIndex = vulkanDevice->getMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &attachment->mem));
+		VK_CHECK_RESULT(vkBindImageMemory(device, attachment->image, attachment->mem, 0));
+
+		VkImageViewCreateInfo imageView = vks::initializers::imageViewCreateInfo();
+		imageView.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		imageView.format = format;
+		imageView.subresourceRange = {};
+		imageView.subresourceRange.aspectMask = aspectMask;
+		imageView.subresourceRange.baseMipLevel = 0;
+		imageView.subresourceRange.levelCount = 1;
+		imageView.subresourceRange.baseArrayLayer = 0;
+		imageView.subresourceRange.layerCount = 1;
+		imageView.image = attachment->image;
+		VK_CHECK_RESULT(vkCreateImageView(device, &imageView, nullptr, &attachment->view));
+	}
+
 	//first render pass
 	void setupFirstRenderPass() {
-		std::array<VkAttachmentDescription, 2> attachments = {};
+		createAttachment(VK_FORMAT_R8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, &tonemappingFrameBuffer.color, width, height);
+
+		std::array<VkAttachmentDescription, 2> attachmentDes = {};
 		// Color attachment
-		attachments[0].format = tonemappingFrameBuffer.color.format;
-		attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-		attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		//attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;//用于表示图像将被呈现到屏幕上的情况。当图像使用此布局时，它可以被显示引擎直接读取以在屏幕上显示
-		attachments[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;//图像将用作着色器读取操作的情况
+		attachmentDes[0].format = tonemappingFrameBuffer.color.format;
+		attachmentDes[0].samples = VK_SAMPLE_COUNT_1_BIT;
+		attachmentDes[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachmentDes[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		attachmentDes[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachmentDes[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachmentDes[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		//attachmentDes[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;//用于表示图像将被呈现到屏幕上的情况。当图像使用此布局时，它可以被显示引擎直接读取以在屏幕上显示
+		attachmentDes[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;//图像将用作着色器读取操作的情况
 		// Depth attachment
-		attachments[1].format = depthFormat;
-		attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
-		attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		attachmentDes[1].format = depthFormat;
+		attachmentDes[1].samples = VK_SAMPLE_COUNT_1_BIT;
+		attachmentDes[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachmentDes[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		attachmentDes[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachmentDes[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachmentDes[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		attachmentDes[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
 		VkAttachmentReference colorReference = {};
-		colorReference.attachment = 0;
+		colorReference.attachment = 0;//index
 		colorReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
 		VkAttachmentReference depthReference = {};
@@ -1680,47 +1682,84 @@ public:
 		subpassDescription.colorAttachmentCount = 1;
 		subpassDescription.pColorAttachments = &colorReference;
 		subpassDescription.pDepthStencilAttachment = &depthReference;
-		subpassDescription.inputAttachmentCount = 0;
+		subpassDescription.inputAttachmentCount = 0;//输入attachment
 		subpassDescription.pInputAttachments = nullptr;
-		subpassDescription.preserveAttachmentCount = 0;
+		subpassDescription.preserveAttachmentCount = 0;//保留attachment
 		subpassDescription.pPreserveAttachments = nullptr;
 		subpassDescription.pResolveAttachments = nullptr;
 
 		// Subpass dependencies for layout transitions
 		std::array<VkSubpassDependency, 2> dependencies;
 
+		// frag --> color attachment 
+		// 正确的渲染顺序和资源同步
 		dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-		dependencies[0].dstSubpass = 0;
 		dependencies[0].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-		dependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-		dependencies[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-		dependencies[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
-		dependencies[0].dependencyFlags = 0;
+		dependencies[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
 
-		dependencies[1].srcSubpass = VK_SUBPASS_EXTERNAL;
-		dependencies[1].dstSubpass = 0;
+		dependencies[0].dstSubpass = 0;
+		dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;		
+		dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+		dependencies[1].srcSubpass = 0;
 		dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+		dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
 		dependencies[1].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		dependencies[1].srcAccessMask = 0;
 		dependencies[1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
-		dependencies[1].dependencyFlags = 0;
+		dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+		//dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+		//dependencies[0].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		//dependencies[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		// 
+		//dependencies[0].dstSubpass = 0;
+		//dependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		//dependencies[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+
+		//dependencies[1].srcSubpass = VK_SUBPASS_EXTERNAL;
+		//dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		//dependencies[1].srcAccessMask = 0;
+		// 
+		//dependencies[1].dstSubpass = 0;
+		//dependencies[1].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		//dependencies[1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
 
 		VkRenderPassCreateInfo renderPassInfo = {};
 		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-		renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-		renderPassInfo.pAttachments = attachments.data();
+		renderPassInfo.attachmentCount = static_cast<uint32_t>(attachmentDes.size());
+		renderPassInfo.pAttachments = attachmentDes.data();
 		renderPassInfo.subpassCount = 1;
 		renderPassInfo.pSubpasses = &subpassDescription;
 		renderPassInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
 		renderPassInfo.pDependencies = dependencies.data();
 
 		VK_CHECK_RESULT(vkCreateRenderPass(device, &renderPassInfo, nullptr, &tonemappingFrameBuffer.renderPass));
+		//创建的VkRenderpass是一些Info
+
+
+		VkImageView attachments[2];
+		attachments[0] = tonemappingFrameBuffer.color.view;
+		attachments[1] = depthStencil.view;
+
+		VkFramebufferCreateInfo fbufCreateInfo = vks::initializers::framebufferCreateInfo();
+		tonemappingFrameBuffer.setSize(width, height);
+		fbufCreateInfo.renderPass = tonemappingFrameBuffer.renderPass;
+		fbufCreateInfo.pAttachments = attachments;
+		fbufCreateInfo.attachmentCount = 2;
+		fbufCreateInfo.width = tonemappingFrameBuffer.width;
+		fbufCreateInfo.height = tonemappingFrameBuffer.height;
+		fbufCreateInfo.layers = 1;
+		VK_CHECK_RESULT(vkCreateFramebuffer(device, &fbufCreateInfo, nullptr, &tonemappingFrameBuffer.frameBuffer));
+		//创建FrameBuffer，Create来填充renderPass
 	}
 
 	void preparePipelines()
 	{
 		{
-		createAttachment(VK_FORMAT_R8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, &tonemappingFrameBuffer.color, width, height);
+		
 		setupFirstRenderPass();
 		// Shared sampler used for all color attachments
 		VkSamplerCreateInfo samplerCI = vks::initializers::samplerCreateInfo();
@@ -1737,19 +1776,7 @@ public:
 		samplerCI.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
 		VK_CHECK_RESULT(vkCreateSampler(device, &samplerCI, nullptr, &colorSampler));
 
-		VkImageView attachments[2];
-		attachments[0] = tonemappingFrameBuffer.color.view;
-		attachments[1] = depthStencil.view;
-
-		VkFramebufferCreateInfo fbufCreateInfo = vks::initializers::framebufferCreateInfo();
-		tonemappingFrameBuffer.setSize(width, height);
-		fbufCreateInfo.renderPass = tonemappingFrameBuffer.renderPass;
-		fbufCreateInfo.pAttachments = attachments;
-		fbufCreateInfo.attachmentCount = 2;
-		fbufCreateInfo.width = tonemappingFrameBuffer.width;
-		fbufCreateInfo.height = tonemappingFrameBuffer.height;
-		fbufCreateInfo.layers = 1;
-		VK_CHECK_RESULT(vkCreateFramebuffer(device, &fbufCreateInfo, nullptr, &tonemappingFrameBuffer.frameBuffer));
+		
 		}
 
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
